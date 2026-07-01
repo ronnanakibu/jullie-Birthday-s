@@ -291,3 +291,22 @@ export function playHeartbeat() {
 export function isAudioSupported() {
     return typeof window !== "undefined" && !!(window.AudioContext || (window as any).webkitAudioContext);
 }
+
+/** One-shot: very soft gentle chime/pluck for typewriter letter typing */
+export function playTypewriterSound() {
+    const ctx = getCtx();
+    if (!ctx) return;
+    if (ctx.state === "suspended") ctx.resume();
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    // Gentle high pitch tick/pluck sound (1000Hz - 1400Hz)
+    osc.frequency.setValueAtTime(1000 + Math.random() * 300, ctx.currentTime);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.006, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.04);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.05);
+}
+

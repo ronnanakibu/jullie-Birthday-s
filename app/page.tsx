@@ -89,7 +89,7 @@ export default function BirthdayLetterPage() {
                     <Letter key="story" onComplete={() => setStage("celebration")} reduced={reduced} />
                 )}
                 {stage === "celebration" && (
-                    <Celebration key="celebration" reduced={reduced} />
+                    <Celebration key="celebration" reduced={reduced} onReset={() => setStage("envelope")} />
                 )}
             </AnimatePresence>
         </div>
