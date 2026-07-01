@@ -1,10 +1,13 @@
 "use client";
 
 /**
- * Generative audio engine — no external audio files required.
- * Produces soft ambient piano-ish pad, paper rustle, envelope seal
- * crack, and a gentle chime, entirely via Web Audio API oscillators
- * and filtered noise. Keeps the deploy dependency-free.
+ * Dual-Mode Generative + File Audio Engine.
+ * 
+ * Attempts to load and play a high-quality instrumental file "/love-instrumental.mp3"
+ * from the public folder (recommended for wave to earth's track). 
+ * 
+ * If the file is not found (404) or fails to play, it dynamically falls back
+ * to a generative ambient synth pad + filtered wind, keeping the card functional.
  */
 
 type NodeRefs = {
@@ -27,6 +30,9 @@ const refs: NodeRefs = {
     started: false,
 };
 
+let fileAudio: HTMLAudioElement | null = null;
+let useSynthFallback = false;
+
 function getCtx(): AudioContext | null {
     if (typeof window === "undefined") return null;
     if (!refs.ctx) {
@@ -47,24 +53,65 @@ function makeNoiseBuffer(ctx: AudioContext, seconds = 4) {
     let lastOut = 0;
     for (let i = 0; i < bufferSize; i++) {
         const white = Math.random() * 2 - 1;
-        // pink-ish noise via leaky integrator, for a softer "wind" texture
         lastOut = (lastOut + 0.02 * white) / 1.02;
         data[i] = lastOut * 3.2;
     }
     return buffer;
 }
 
-/** Starts the ambient pad + wind bed. Call from a user gesture. */
+/** Starts the ambient audio (attempts mp3 file, falls back to synth on failure). */
 export function startAmbient(targetVolume = 0.14) {
     const ctx = getCtx();
     if (!ctx || !refs.master) return;
     if (ctx.state === "suspended") ctx.resume();
+
+    // Setup the master gain nodes
+    refs.master.gain.cancelScheduledValues(ctx.currentTime);
+    refs.master.gain.linearRampToValueAtTime(targetVolume, ctx.currentTime + 1.5);
+
     if (refs.started) {
-        refs.master.gain.cancelScheduledValues(ctx.currentTime);
-        refs.master.gain.linearRampToValueAtTime(targetVolume, ctx.currentTime + 1.5);
+        if (fileAudio && !useSynthFallback) {
+            fileAudio.volume = targetVolume;
+            fileAudio.play().catch(() => {
+                useSynthFallback = true;
+                startSynthOnly(ctx);
+            });
+        }
         return;
     }
     refs.started = true;
+
+    // Initialize HTML5 Audio element for file playing
+    if (typeof window !== "undefined") {
+        fileAudio = new Audio("/love-instrumental.mp3");
+        fileAudio.loop = true;
+        fileAudio.volume = targetVolume;
+
+        fileAudio.addEventListener("error", () => {
+            console.warn("Audio file /love-instrumental.mp3 not found or could not load. Using generative synth fallback.");
+            useSynthFallback = true;
+            startSynthOnly(ctx);
+        });
+
+        fileAudio.play()
+            .then(() => {
+                console.log("Playing /love-instrumental.mp3 successfully.");
+                useSynthFallback = false;
+            })
+            .catch((err) => {
+                console.warn("Audio play blocked or failed. Using generative synth fallback:", err);
+                useSynthFallback = true;
+                startSynthOnly(ctx);
+            });
+    } else {
+        useSynthFallback = true;
+        startSynthOnly(ctx);
+    }
+}
+
+/** Generative synthesis fallback */
+function startSynthOnly(ctx: AudioContext) {
+    if (!refs.master || refs.padOscillators.length > 0) return;
 
     // Soft pad: three detuned sine/triangle oscillators, slow filtered
     const padGain = ctx.createGain();
@@ -110,24 +157,28 @@ export function startAmbient(targetVolume = 0.14) {
     windSource.start();
     refs.windSource = windSource;
     refs.windGain = windGain;
-
-    refs.master.gain.cancelScheduledValues(ctx.currentTime);
-    refs.master.gain.setValueAtTime(0, ctx.currentTime);
-    refs.master.gain.linearRampToValueAtTime(targetVolume, ctx.currentTime + 2.2);
 }
 
 export function stopAmbient() {
     const ctx = refs.ctx;
-    if (!ctx || !refs.master) return;
-    refs.master.gain.cancelScheduledValues(ctx.currentTime);
-    refs.master.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.2);
+    if (fileAudio && !useSynthFallback) {
+        fileAudio.pause();
+    }
+    if (ctx && refs.master) {
+        refs.master.gain.cancelScheduledValues(ctx.currentTime);
+        refs.master.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.2);
+    }
 }
 
 export function setAmbientVolume(v: number) {
     const ctx = refs.ctx;
-    if (!ctx || !refs.master) return;
-    refs.master.gain.cancelScheduledValues(ctx.currentTime);
-    refs.master.gain.linearRampToValueAtTime(v, ctx.currentTime + 0.8);
+    if (fileAudio && !useSynthFallback) {
+        fileAudio.volume = v;
+    }
+    if (ctx && refs.master) {
+        refs.master.gain.cancelScheduledValues(ctx.currentTime);
+        refs.master.gain.linearRampToValueAtTime(v, ctx.currentTime + 0.8);
+    }
 }
 
 /** One-shot: soft paper rustle burst (envelope opening, letter unfolding) */
